@@ -13,12 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"runtime/debug"
 	"time"
-
-	"github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/ext"
-	"github.com/opentracing/opentracing-go/mocktracer"
 )
 
 const (
@@ -124,27 +119,6 @@ func (fa *Forward) createTLSConfig() (*tls.Config, error) {
 
 func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	log.Println("receive request: ", req.URL.Path)
-defer func() {
-	if e := recover(); e != nil {
-		log.Println(e)
-		log.Println("end")
-		log.Println(debug.Stack())
-	}
-}()
-	tracer := mocktracer.New()
-	opentracing.SetGlobalTracer(tracer)
-
-	spanCtx, err := opentracing.GlobalTracer().Extract(opentracing.HTTPHeaders, opentracing.HTTPHeadersCarrier(req.Header))
-	if err != nil {
-		log.Println("extract err", err)
-	}
-	log.Println("spanctx => ", spanCtx)
-	if spanCtx != nil {
-		span := opentracing.StartSpan("my name", ext.RPCServerOption(spanCtx))
-		if span != nil {
-			span.SetTag("is", "ok")
-		}
-	}
 	if err := fa.authorityAuthentication(req); err != nil {
 		logMessage := fmt.Sprintf("error calling authorization service %s. Cause: %s", fa.config.AuthAddress, err)
 		log.Printf(logMessage)
