@@ -1,0 +1,10 @@
+displayName: Forward Https
+type: middleware
+
+import: github.com/rcy1122/forward-https
+
+summary: 'https demo'
+
+testData:
+  rootCA: /path/of/ca
+  authAddress: /address/for/auth
