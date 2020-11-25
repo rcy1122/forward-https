@@ -8,16 +8,12 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"time"
-
-	"github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/ext"
 )
 
 const (
@@ -66,12 +62,10 @@ func CreateConfig() *Config {
 }
 
 type Forward struct {
-	name        string
-	next        http.Handler
-	config      *Config
-	client      *http.Client
-	tracer      opentracing.Tracer
-	tracerClose io.Closer
+	name   string
+	next   http.Handler
+	config *Config
+	client *http.Client
 }
 
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
@@ -84,10 +78,6 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		config: config,
 		next:   next,
 	}
-
-	t, c := Init(name)
-	fa.tracer = t
-	fa.tracerClose = c
 
 	if config.RootCA.IsPath() {
 		log.Printf("root ca path: %s", config.RootCA.String())
@@ -129,17 +119,6 @@ func (fa *Forward) createTLSConfig() (*tls.Config, error) {
 
 func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	log.Println("receive request: ", req.URL.Path)
-	spanCtx, err := opentracing.GlobalTracer().Extract(opentracing.HTTPHeaders, opentracing.HTTPHeadersCarrier(req.Header))
-	if err != nil {
-		log.Println("extract err", err)
-	}
-	span2 := opentracing.GlobalTracer().StartSpan("cub status", ext.RPCServerOption(spanCtx))
-	if span2 == nil {
-		log.Println("span is nil err")
-		return
-	}
-	defer span2.Finish()
-
 	if err := fa.authorityAuthentication(req); err != nil {
 		logMessage := fmt.Sprintf("error calling authorization service %s. Cause: %s", fa.config.AuthAddress, err)
 		log.Printf(logMessage)
