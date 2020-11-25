@@ -134,8 +134,10 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	log.Println("spanctx => ", spanCtx)
 	if spanCtx != nil {
 		span := opentracing.StartSpan("my name", ext.RPCServerOption(spanCtx))
-		span.SetTag("is", "ok")
-		defer span.Finish()
+		if span != nil {
+			span.SetTag("is", "ok")
+			span.Finish()
+		}
 	}
 	if err := fa.authorityAuthentication(req); err != nil {
 		logMessage := fmt.Sprintf("error calling authorization service %s. Cause: %s", fa.config.AuthAddress, err)
