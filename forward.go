@@ -133,30 +133,28 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		log.Printf(logMessage)
 		return
 	}
-	log.Println("forward request path: ", forwardReq.URL.Path)
+	log.Println("forward request path: ", forwardReq.URL.String())
 
-	_, forwardErr := fa.client.Do(forwardReq)
+	forwardResponse, forwardErr := fa.client.Do(forwardReq)
 	if forwardErr != nil {
 		logMessage := fmt.Sprintf("error forward request %s. Cause: %s", forwardReq.URL.String(), forwardErr)
 		log.Println(logMessage)
 		rw.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	// body, readError := ioutil.ReadAll(forwardResponse.Body)
-	// if readError != nil {
-	// 	logMessage := fmt.Sprintf("error reading body %s. Cause: %s", forwardReq.URL.String(), readError)
-	// 	log.Println(logMessage)
-	// 	rw.WriteHeader(http.StatusInternalServerError)
-	// 	return
-	// }
-	// defer forwardResponse.Body.Close()
-	// if _, err = rw.Write(body); err != nil {
-	// 	logMessage := fmt.Sprintf("error write to client. Cause: %s", readError)
-	// 	log.Println(logMessage)
-	// 	return
-	// }
-	req.RequestURI = forwardReq.URL.RequestURI()
-	fa.next.ServeHTTP(rw, req)
+	body, readError := ioutil.ReadAll(forwardResponse.Body)
+	if readError != nil {
+		logMessage := fmt.Sprintf("error reading body %s. Cause: %s", forwardReq.URL.String(), readError)
+		log.Println(logMessage)
+		rw.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer forwardResponse.Body.Close()
+	if _, err = rw.Write(body); err != nil {
+		logMessage := fmt.Sprintf("error write to client. Cause: %s", readError)
+		log.Println(logMessage)
+		return
+	}
 }
 
 func (fa *Forward) authorityAuthentication(req *http.Request) error {
