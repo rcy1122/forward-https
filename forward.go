@@ -17,6 +17,7 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/mocktracer"
+	"github.com/rcy1122/forward-https/vendor/github.com/opentracing/opentracing-go/ext"
 )
 
 const (
@@ -126,6 +127,16 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	tracer := mocktracer.New()
 	opentracing.SetGlobalTracer(tracer)
 
+	spanCtx, err := opentracing.GlobalTracer().Extract(opentracing.HTTPHeaders, opentracing.HTTPHeadersCarrier(req.Header))
+	if err != nil {
+		log.Println("extract err", err)
+	}
+	log.Println("spanctx => ", spanCtx)
+	if spanCtx != nil {
+		span := opentracing.StartSpan("my name", ext.RPCServerOption(spanCtx))
+		span.SetTag("is", "ok")
+		defer span.Finish()
+	}
 	if err := fa.authorityAuthentication(req); err != nil {
 		logMessage := fmt.Sprintf("error calling authorization service %s. Cause: %s", fa.config.AuthAddress, err)
 		log.Printf(logMessage)
