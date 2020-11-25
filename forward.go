@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go/ext"
 	"github.com/opentracing/opentracing-go/mocktracer"
-	"github.com/rcy1122/forward-https/vendor/github.com/opentracing/opentracing-go/ext"
 )
 
 const (
@@ -150,6 +150,7 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		logMessage := fmt.Sprintf("error assembly request %s. Cause: %s", req.URL.Path, err)
 		log.Printf(logMessage)
+		rw.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	log.Println("forward request path: ", forwardReq.URL.String())
