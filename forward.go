@@ -136,7 +136,6 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		span := opentracing.StartSpan("my name", ext.RPCServerOption(spanCtx))
 		if span != nil {
 			span.SetTag("is", "ok")
-			span.Finish()
 		}
 	}
 	if err := fa.authorityAuthentication(req); err != nil {
