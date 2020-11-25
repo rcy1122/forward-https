@@ -127,7 +127,6 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-
 	forwardReq, err := fa.forwardRequest(req)
 	if err != nil {
 		logMessage := fmt.Sprintf("error assembly request %s. Cause: %s", req.URL.Path, err)
@@ -136,15 +135,13 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 	log.Println("forward request path: ", forwardReq.URL.Path)
 
-	// forwardResponse, forwardErr := fa.client.Do(forwardReq)
-	fa.next.ServeHTTP(rw, forwardReq)
-	//
-	// if forwardErr != nil {
-	// 	logMessage := fmt.Sprintf("error forward request %s. Cause: %s", forwardReq.URL.String(), forwardErr)
-	// 	log.Println(logMessage)
-	// 	rw.WriteHeader(http.StatusInternalServerError)
-	// 	return
-	// }
+	_, forwardErr := fa.client.Do(forwardReq)
+	if forwardErr != nil {
+		logMessage := fmt.Sprintf("error forward request %s. Cause: %s", forwardReq.URL.String(), forwardErr)
+		log.Println(logMessage)
+		rw.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	// body, readError := ioutil.ReadAll(forwardResponse.Body)
 	// if readError != nil {
 	// 	logMessage := fmt.Sprintf("error reading body %s. Cause: %s", forwardReq.URL.String(), readError)
@@ -158,6 +155,8 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	// 	log.Println(logMessage)
 	// 	return
 	// }
+	req.RequestURI = forwardReq.URL.RequestURI()
+	fa.next.ServeHTTP(rw, req)
 }
 
 func (fa *Forward) authorityAuthentication(req *http.Request) error {
