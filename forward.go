@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -123,7 +124,13 @@ func (fa *Forward) createTLSConfig() (*tls.Config, error) {
 
 func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	log.Println("receive request: ", req.URL.Path)
-
+defer func() {
+	if e := recover(); e != nil {
+		log.Println(e)
+		log.Println("end")
+		log.Println(debug.Stack())
+	}
+}()
 	tracer := mocktracer.New()
 	opentracing.SetGlobalTracer(tracer)
 
