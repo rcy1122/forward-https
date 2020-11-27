@@ -158,13 +158,26 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 }
 
 func (fa *Forward) authorityAuthentication(req *http.Request) error {
-	if req.TLS != nil {
-		log.Printf("receive requet tls ver %v", req.TLS.VerifiedChains)
-		log.Printf("receive requet tls verify length %v", len(req.TLS.VerifiedChains))
-		log.Printf("receive requet handleshake %v", req.TLS.HandshakeComplete)
-	}
+
 	if len(fa.config.AuthAddress) == 0 {
 		return errors.New("specify authentication link ")
+	}
+
+	if req.TLS == nil {
+		return errors.New("conn state is nil")
+	}
+
+	conn := req.TLS
+	log.Printf("%s", string(conn.OCSPResponse))
+
+	for _, k := range conn.VerifiedChains {
+		for _, v := range k {
+			log.Printf("issuer %s", v.Issuer.String())
+			log.Printf("public key %v", v.PublicKey)
+			for _, k := range v.OCSPServer {
+				log.Println("k ocsp server", k)
+			}
+		}
 	}
 	return nil
 }
