@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"os"
 	"time"
+
+	"github.com/miekg/dns"
 )
 
 const (
@@ -100,6 +102,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	fa.client.Transport = tr
 	return fa, nil
 }
+
 
 func (fa *Forward) createTLSConfig() (*tls.Config, error) {
 	ca, err := fa.config.RootCA.Read()
@@ -216,7 +219,7 @@ func (fa *Forward) forwardRequest(req *http.Request) (*http.Request, error) {
 
 func (fa *Forward) queryAddressPort(req *http.Request) (string, error) {
 	host := req.URL.Host
-	newRequest, err := http.NewRequest(http.MethodGet, "http://cub.baas.com:443/health", nil)
+	newRequest, err := http.NewRequest(http.MethodGet, "https://cub.baas.com:443/health", nil)
 	if err != nil {
 		return "", fmt.Errorf("call cub %w", err)
 	}
