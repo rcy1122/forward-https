@@ -126,6 +126,13 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	_, err := fa.queryAddressPort(req)
+	if err != nil {
+		logMessage := fmt.Sprintf("error read request %s. Cause: %s", req.URL.Path, err)
+		log.Printf(logMessage)
+		return
+	}
+
 	forwardReq, err := fa.forwardRequest(req)
 	if err != nil {
 		logMessage := fmt.Sprintf("error assembly request %s. Cause: %s", req.URL.Path, err)
@@ -205,4 +212,23 @@ func (fa *Forward) forwardRequest(req *http.Request) (*http.Request, error) {
 	}
 	r.Header = req.Header
 	return r, nil
+}
+
+func (fa *Forward) queryAddressPort(req *http.Request) (string, error) {
+	host := req.URL.Host
+	newRequest, err := http.NewRequest(http.MethodGet, "http://cub.baas.com:80/health", nil)
+	if err != nil {
+		return "", fmt.Errorf("call cub %w", err)
+	}
+	forwardResponse, forwardErr := fa.client.Do(newRequest)
+	if forwardErr != nil {
+		return "", fmt.Errorf("call new request %w", err)
+	}
+	defer forwardResponse.Body.Close()
+	b, err := ioutil.ReadAll(forwardResponse.Body)
+	if err != nil {
+		return "", fmt.Errorf("read new request %w", err)
+	}
+	log.Println("==> read form cub server ", string(b))
+	return host, nil
 }
