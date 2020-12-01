@@ -14,8 +14,6 @@ import (
 	"net/url"
 	"os"
 	"time"
-
-	"github.com/miekg/dns"
 )
 
 const (
@@ -102,7 +100,6 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	fa.client.Transport = tr
 	return fa, nil
 }
-
 
 func (fa *Forward) createTLSConfig() (*tls.Config, error) {
 	ca, err := fa.config.RootCA.Read()
