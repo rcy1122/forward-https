@@ -216,7 +216,7 @@ func (fa *Forward) forwardRequest(req *http.Request) (*http.Request, error) {
 
 func (fa *Forward) queryAddressPort(req *http.Request) (string, error) {
 	host := req.URL.Host
-	newRequest, err := http.NewRequest(http.MethodGet, "https://cub.cluster.local:443/health", nil)
+	newRequest, err := http.NewRequest(http.MethodGet, "http://cub.cluster.local:80/health", nil)
 	if err != nil {
 		return "", fmt.Errorf("call cub %w", err)
 	}
