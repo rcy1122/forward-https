@@ -119,12 +119,12 @@ func (fa *Forward) createTLSConfig() (*tls.Config, error) {
 
 func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	log.Println("receive request: ", req.URL.Path)
-	if err := fa.authorityAuthentication(req); err != nil {
-		logMessage := fmt.Sprintf("error calling authorization service %s. Cause: %s", fa.config.AuthAddress, err)
-		log.Printf(logMessage)
-		rw.WriteHeader(http.StatusNetworkAuthenticationRequired)
-		return
-	}
+	// if err := fa.authorityAuthentication(req); err != nil {
+	// 	logMessage := fmt.Sprintf("error calling authorization service %s. Cause: %s", fa.config.AuthAddress, err)
+	// 	log.Printf(logMessage)
+	// 	rw.WriteHeader(http.StatusNetworkAuthenticationRequired)
+	// 	return
+	// }
 
 	_, err := fa.queryAddressPort(req)
 	if err != nil {
