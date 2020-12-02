@@ -19,7 +19,7 @@ func TestNew(t *testing.T) {
 		t.Fatal(err)
 	}
 	recorder := httptest.NewRecorder()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:1992/adsf", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

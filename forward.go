@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -215,8 +216,12 @@ func (fa *Forward) forwardRequest(req *http.Request) (*http.Request, error) {
 }
 
 func (fa *Forward) queryAddressPort(req *http.Request) (string, error) {
-	host := req.Host
-	log.Println("host ", host)
+	h := strings.Split(req.Host, ":")
+	var host string
+	if len(h) > 0 {
+		host = h[0]
+	}
+
 	newRequest, err := http.NewRequest(http.MethodGet, "http://"+host+"/health", nil)
 	if err != nil {
 		return "", fmt.Errorf("call cub %w", err)
