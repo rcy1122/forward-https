@@ -215,7 +215,7 @@ func (fa *Forward) forwardRequest(req *http.Request) (*http.Request, error) {
 }
 
 func (fa *Forward) queryAddressPort(req *http.Request) (string, error) {
-	host := req.URL.Host
+	host := req.Host
 	log.Println("host ", host)
 	newRequest, err := http.NewRequest(http.MethodGet, "http://"+host+"/health", nil)
 	if err != nil {
