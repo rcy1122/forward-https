@@ -203,9 +203,14 @@ func (fa *Forward) forwardRequest(req *http.Request) (*http.Request, error) {
 	}
 
 	u := bytes.Buffer{}
-	u.WriteString("http://")
+	po := m[port][0]
+	if po == "80" {
+		u.WriteString("http://")
+	} else {
+		u.WriteString("https://")
+	}
 	u.WriteString(m[services][0])
-	u.WriteString(fmt.Sprintf(":%v", m[port][0]))
+	u.WriteString(fmt.Sprintf(":%v",po ))
 	u.WriteString(req.URL.Path)
 	r, err := http.NewRequest(req.Method, u.String(), req.Body)
 	if err != nil {
