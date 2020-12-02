@@ -203,7 +203,7 @@ func (fa *Forward) forwardRequest(req *http.Request) (*http.Request, error) {
 	}
 
 	u := bytes.Buffer{}
-	u.WriteString("https://")
+	u.WriteString("http://")
 	u.WriteString(m[services][0])
 	u.WriteString(fmt.Sprintf(":%v", m[port][0]))
 	u.WriteString(req.URL.Path)
