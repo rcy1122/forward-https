@@ -171,7 +171,7 @@ func (fa *Forward) authorityAuthentication(req *http.Request) (bool, error) {
 	}
 
 	if req.TLS == nil {
-		return false, errors.New("conn state is nil")
+		return false, errors.New("conn tls state is nil")
 	}
 
 	allow, err := fa.requestAuthorization(req)
@@ -226,6 +226,7 @@ func (fa *Forward) requestAuthorization(req *http.Request) (bool, error) {
 	if err := json.Unmarshal(b, &o); err != nil {
 		return false, fmt.Errorf("unmarshal: %w", err)
 	}
+	log.Printf("Request: %s, %s, %s ---> %v", q.Get("sub"), q.Get("obj"), "conn", o.Data.Allow)
 	return o.Data.Allow, nil
 }
 
