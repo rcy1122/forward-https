@@ -7,4 +7,5 @@ summary: 'https demo'
 
 testData:
   rootCA: /path/of/ca
-  authAddress: /address/for/auth
+  authAddress: http://address.for.auth
+  port: 12345

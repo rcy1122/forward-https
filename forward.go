@@ -6,12 +6,12 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -52,6 +52,7 @@ func (f FileOrContent) Read() ([]byte, error) {
 type Config struct {
 	RootCA      FileOrContent `json:"rootCA, omitempty"`
 	AuthAddress string        `json:"authAddress, omitempty"`
+	Port        string        `json:"port, omitempty"`
 }
 
 // CreateConfig creates the default plugin configuration.
@@ -59,6 +60,7 @@ func CreateConfig() *Config {
 	return &Config{
 		RootCA:      "",
 		AuthAddress: "",
+		Port:        "17051",
 	}
 }
 
@@ -120,17 +122,15 @@ func (fa *Forward) createTLSConfig() (*tls.Config, error) {
 
 func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	log.Println("receive request: ", req.URL.Path)
-	// if err := fa.authorityAuthentication(req); err != nil {
-	// 	logMessage := fmt.Sprintf("error calling authorization service %s. Cause: %s", fa.config.AuthAddress, err)
-	// 	log.Printf(logMessage)
-	// 	rw.WriteHeader(http.StatusNetworkAuthenticationRequired)
-	// 	return
-	// }
-
-	_, err := fa.queryAddressPort(req)
+	allow, err := fa.authorityAuthentication(req)
 	if err != nil {
-		logMessage := fmt.Sprintf("error read request %s. Cause: %s", req.URL.Path, err)
+		logMessage := fmt.Sprintf("error calling authorization service: %s. Cause: %s", fa.config.AuthAddress, err)
 		log.Printf(logMessage)
+		rw.WriteHeader(http.StatusNetworkAuthenticationRequired)
+		return
+	}
+	if allow == false {
+		rw.WriteHeader(http.StatusForbidden)
 		return
 	}
 
@@ -165,52 +165,81 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (fa *Forward) authorityAuthentication(req *http.Request) error {
-
+func (fa *Forward) authorityAuthentication(req *http.Request) (bool, error) {
 	if len(fa.config.AuthAddress) == 0 {
-		return errors.New("specify authentication link ")
+		return false, errors.New("specify authentication link ")
 	}
 
 	if req.TLS == nil {
-		return errors.New("conn state is nil")
+		return false, errors.New("conn state is nil")
 	}
 
-	conn := req.TLS
-	log.Printf("%s", string(conn.OCSPResponse))
-
-	for _, k := range conn.VerifiedChains {
-		for _, v := range k {
-			log.Printf("issuer %s", v.Issuer.String())
-			log.Printf("public key %v", v.PublicKey)
-			for _, k := range v.OCSPServer {
-				log.Println("k ocsp server", k)
-			}
-		}
+	allow, err := fa.requestAuthorization(req)
+	if err != nil {
+		return false, fmt.Errorf("authorization: %w", err)
 	}
-	return nil
+	return allow, nil
+}
+
+type Enforce struct {
+	Data *Data `description:"Response detail. data = {} . " json:"data"`
+}
+
+type Data struct {
+	Allow bool `description:"allow in access control."  json:"allow"`
+}
+
+func (fa *Forward) requestAuthorization(req *http.Request) (bool, error) {
+	forwardReq, err := http.NewRequest(http.MethodGet, fa.config.AuthAddress, nil)
+	if err != nil {
+		return false, fmt.Errorf("new request: %w ", err)
+	}
+	// TODO rcy
+	// conn := req.TLS
+	// log.Printf("OCSPResponse: %s", string(conn.OCSPResponse))
+	// for _, k := range conn.VerifiedChains {
+	// 	for _, v := range k {
+	// 		log.Printf("issuer %s", v.Issuer.String())
+	// 		log.Printf("public key %v", v.PublicKey)
+	// 		for _, k := range v.OCSPServer {
+	// 			log.Println("k ocsp server", k)
+	// 		}
+	// 	}
+	// }
+	q := req.URL.Query()
+	q.Set("sub", "publicKey1")
+	q.Set("obj", "peer1")
+	q.Set("act", "conn")
+	forwardReq.URL.RawQuery = q.Encode()
+
+	resp, err := fa.client.Do(forwardReq)
+	if err != nil {
+		return false, fmt.Errorf("calling request %s, err: %w ", fa.config.AuthAddress, err)
+	}
+	defer resp.Body.Close()
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("read body: %w", err)
+	}
+
+	var o Enforce
+	if err := json.Unmarshal(b, &o); err != nil {
+		return false, fmt.Errorf("unmarshal: %w", err)
+	}
+	return o.Data.Allow, nil
 }
 
 func (fa *Forward) forwardRequest(req *http.Request) (*http.Request, error) {
-	m, err := url.ParseQuery(req.URL.RawQuery)
-	if err != nil {
-		return nil, fmt.Errorf("parse query from url: %w", err)
-	}
-	if _, ok := m[services]; !ok {
-		return nil, fmt.Errorf("the parameter is missing the service name ")
-	}
-	if _, ok := m[port]; !ok {
-		return nil, fmt.Errorf("the parameter is missing the service port ")
-	}
-
+	host := fa.queryForwardAddressPort(req)
 	u := bytes.Buffer{}
-	po := m[port][0]
+	po := fa.config.Port
 	if po == "80" {
 		u.WriteString("http://")
 	} else {
 		u.WriteString("https://")
 	}
-	u.WriteString(m[services][0])
-	u.WriteString(fmt.Sprintf(":%v",po ))
+	u.WriteString(host)
+	u.WriteString(fmt.Sprintf(":%v", po))
 	u.WriteString(req.URL.Path)
 	r, err := http.NewRequest(req.Method, u.String(), req.Body)
 	if err != nil {
@@ -220,26 +249,12 @@ func (fa *Forward) forwardRequest(req *http.Request) (*http.Request, error) {
 	return r, nil
 }
 
-func (fa *Forward) queryAddressPort(req *http.Request) (string, error) {
+func (fa *Forward) queryForwardAddressPort(req *http.Request) string {
 	h := strings.Split(req.Host, ":")
 	var host string
 	if len(h) > 0 {
 		host = h[0]
 	}
-
-	newRequest, err := http.NewRequest(http.MethodGet, "http://"+host+"/health", nil)
-	if err != nil {
-		return "", fmt.Errorf("call cub %w", err)
-	}
-	forwardResponse, forwardErr := fa.client.Do(newRequest)
-	if forwardErr != nil {
-		return "", fmt.Errorf("call new request %w", forwardErr)
-	}
-	defer forwardResponse.Body.Close()
-	b, err := ioutil.ReadAll(forwardResponse.Body)
-	if err != nil {
-		return "", fmt.Errorf("read new request %w", err)
-	}
-	log.Println("==> read form cub server ", string(b))
-	return host, nil
+	log.Println("forward host: ", host)
+	return host
 }
