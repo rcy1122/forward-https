@@ -226,7 +226,7 @@ func (fa *Forward) requestAuthorization(req *http.Request) (bool, error) {
 	if err := json.Unmarshal(b, &o); err != nil {
 		return false, fmt.Errorf("unmarshal: %w", err)
 	}
-	log.Printf("Request: %s, %s, %s ---> %v", q.Get("sub"), q.Get("obj"), "conn", o.Data.Allow)
+	log.Printf("Authorization Request: %s, %s, %s ---> %v", q.Get("sub"), q.Get("obj"), "conn", o.Data.Allow)
 	return o.Data.Allow, nil
 }
 
@@ -256,6 +256,5 @@ func (fa *Forward) queryForwardAddressPort(req *http.Request) string {
 	if len(h) > 0 {
 		host = h[0]
 	}
-	log.Println("forward host: ", host)
 	return host
 }
