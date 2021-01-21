@@ -240,18 +240,22 @@ func (fa *Forward) requestAuthorization(req *http.Request) (bool, error) {
 }
 
 func (fa *Forward) forwardRequest(req *http.Request) (*http.Request, error) {
-	host := fa.queryForwardAddressPort(req)
+	host, port := fa.queryForwardAddressPort(req)
 	u := bytes.Buffer{}
-	po := fa.config.Port
-	if po == "80" {
+	if port == "" {
+		port = fa.config.Port
+	}
+	if port == "80" {
 		u.WriteString("http://")
 	} else {
 		u.WriteString("https://")
 	}
 	u.WriteString(host)
-	u.WriteString(fmt.Sprintf(":%v", po))
+	u.WriteString(fmt.Sprintf(":%s", port))
 	u.WriteString(req.URL.Path)
-	r, err := http.NewRequest(req.Method, u.String(), req.Body)
+	forwardUrl := u.String()
+	log.Println("forward to", forwardUrl)
+	r, err := http.NewRequest(req.Method, forwardUrl, req.Body)
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
 	}
@@ -259,11 +263,13 @@ func (fa *Forward) forwardRequest(req *http.Request) (*http.Request, error) {
 	return r, nil
 }
 
-func (fa *Forward) queryForwardAddressPort(req *http.Request) string {
+func (fa *Forward) queryForwardAddressPort(req *http.Request) (string, string) {
 	h := strings.Split(req.Host, ":")
-	var host string
-	if len(h) > 0 {
+	var host, port string
+	if len(h) == 2 {
 		host = h[0]
+		port = h[1]
 	}
-	return host
+
+	return host, port
 }
