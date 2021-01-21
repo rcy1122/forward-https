@@ -121,7 +121,7 @@ func (fa *Forward) createTLSConfig() (*tls.Config, error) {
 }
 
 func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	log.Println("receive request: ", req.URL.Path)
+	log.Println("receive request: ", req.Host, req.URL.Path, fa.config.AuthAddress)
 	allow, err := fa.authorityAuthentication(req)
 	if err != nil {
 		logMessage := fmt.Sprintf("error calling authorization service: %s. Cause: %s", fa.config.AuthAddress, err)
@@ -194,21 +194,30 @@ func (fa *Forward) requestAuthorization(req *http.Request) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("new request: %w ", err)
 	}
-	// TODO rcy
-	// conn := req.TLS
-	// log.Printf("OCSPResponse: %s", string(conn.OCSPResponse))
-	// for _, k := range conn.VerifiedChains {
-	// 	for _, v := range k {
-	// 		log.Printf("issuer %s", v.Issuer.String())
-	// 		log.Printf("public key %v", v.PublicKey)
-	// 		for _, k := range v.OCSPServer {
-	// 			log.Println("k ocsp server", k)
-	// 		}
-	// 	}
-	// }
+	conn := req.TLS
+	sub := ""
+	for _, k := range conn.VerifiedChains {
+		for _, v := range k {
+			log.Printf("Issuer: %v, Subject: %v", v.Issuer, v.Subject)
+			for _, k := range v.OCSPServer {
+				log.Println("k ocsp server", k)
+			}
+			if len(v.Subject.Organization) == 1 {
+				sub = v.Subject.Organization[0]
+			}
+			if sub != "" {
+				break
+			}
+		}
+	}
+	if sub == "" {
+		log.Println("no identity")
+		return false, nil
+	}
+	objs := strings.Split(req.Host, ".")
 	q := req.URL.Query()
-	q.Set("sub", "publicKey1")
-	q.Set("obj", "peer1")
+	q.Set("sub", sub)
+	q.Set("obj", objs[0])
 	q.Set("act", "conn")
 	forwardReq.URL.RawQuery = q.Encode()
 
