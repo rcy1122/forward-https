@@ -158,8 +158,20 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer forwardResponse.Body.Close()
-	log.Println("receive body: ", string(body))
-	return
+	for k, v := range forwardResponse.Header {
+		log.Println("forwardResponse key , v", k, v)
+		for _, vv := range v {
+			rw.Header().Add(k, vv)
+		}
+	}
+	for k, v := range forwardResponse.Trailer {
+		log.Println("Trailer key: v", k, v)
+		for _, vv := range v {
+			rw.Header().Add(k, vv)
+		}
+	}
+	log.Println("forwardResponse.Trailer => ", forwardResponse.Trailer)
+
 	if _, err = rw.Write(body); err != nil {
 		logMessage := fmt.Sprintf("error write to client. Cause: %s", readError)
 		log.Println(logMessage)
