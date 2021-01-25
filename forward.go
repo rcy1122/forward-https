@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -101,6 +102,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	tr.TLSClientConfig = tlsConfig
 
 	fa.client.Transport = tr
+	log.Println("config.AuthAddress: ", fa.config.AuthAddress)
 	return fa, nil
 }
 
@@ -121,8 +123,13 @@ func (fa *Forward) createTLSConfig() (*tls.Config, error) {
 }
 
 func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	log.Println("receive request: ", req.Host, req.URL.Path, fa.config.AuthAddress)
+	start := time.Now()
+	defer func() {
+		log.Println("Plugin ServeHTTP spend time", time.Since(start))
+	}()
+	log.Println("receive request: ", req.Host, req.URL.Path, req.Header.Get("content-type"))
 	allow, err := fa.authorityAuthentication(req)
+	log.Println("authorityAuthentication spend time", time.Since(start))
 	if err != nil {
 		logMessage := fmt.Sprintf("error calling authorization service: %s. Cause: %s", fa.config.AuthAddress, err)
 		log.Printf(logMessage)
@@ -134,6 +141,7 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	start2 := time.Now()
 	forwardReq, err := fa.forwardRequest(req)
 	if err != nil {
 		logMessage := fmt.Sprintf("error assembly request %s. Cause: %s", req.URL.Path, err)
@@ -142,8 +150,10 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 	log.Println("forward request path: ", forwardReq.URL.String())
+	log.Println("forward request: ", forwardReq.Host, forwardReq.URL.Path, forwardReq.Header.Get("content-type"))
 
 	forwardResponse, forwardErr := fa.client.Do(forwardReq)
+	log.Println("forwardRequest spend time", time.Since(start2))
 	if forwardErr != nil {
 		logMessage := fmt.Sprintf("error forward request %s. Cause: %s", forwardReq.URL.String(), forwardErr)
 		log.Println(logMessage)
@@ -159,24 +169,22 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 	defer forwardResponse.Body.Close()
 	for k, v := range forwardResponse.Header {
-		log.Println("forwardResponse key , v", k, v)
+		log.Println("hk, v", k, v)
 		for _, vv := range v {
 			rw.Header().Add(k, vv)
 		}
 	}
-
-	log.Println("forwardResponse.Trailer => ", forwardResponse.Trailer)
+	for k, v := range forwardResponse.Trailer {
+		log.Println("tk, v", k, v)
+		for _, vv := range v {
+			rw.Header().Add(http.TrailerPrefix+k, vv)
+		}
+	}
 
 	if _, err = rw.Write(body); err != nil {
 		logMessage := fmt.Sprintf("error write to client. Cause: %s", readError)
 		log.Println(logMessage)
 		return
-	}
-	for k, v := range forwardResponse.Trailer {
-		log.Println("Trailer key: v", k, v)
-		for _, vv := range v {
-			rw.Header().Add(k, vv)
-		}
 	}
 }
 
@@ -279,11 +287,10 @@ func (fa *Forward) forwardRequest(req *http.Request) (*http.Request, error) {
 }
 
 func (fa *Forward) queryForwardAddressPort(req *http.Request) (string, string) {
-	h := strings.Split(req.Host, ":")
-	var host, port string
-	if len(h) == 2 {
-		host = h[0]
-		port = h[1]
+	host, port, err := net.SplitHostPort(req.Host)
+	if err != nil {
+		log.Printf("Unable to split host and port: %v. Fallback to request host.", err)
+		host = req.Host
 	}
 
 	return host, port
