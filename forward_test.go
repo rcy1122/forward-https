@@ -7,6 +7,11 @@ import (
 	"testing"
 )
 
+const (
+	services = "services"
+	port     = "port"
+)
+
 func TestNew(t *testing.T) {
 	cfg := CreateConfig()
 	cfg.RootCA = "../example/root-ca.crt"

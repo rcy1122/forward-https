@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	services = "services"
-	port     = "port"
+// services = "services"
+// port     = "port"
 )
 
 type FileOrContent string
@@ -143,6 +143,7 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 	log.Println("forward request path: ", forwardReq.URL.String())
 
+	// grpc.Dial(forwardReq.URL.String())
 	forwardResponse, forwardErr := fa.client.Do(forwardReq)
 	if forwardErr != nil {
 		logMessage := fmt.Sprintf("error forward request %s. Cause: %s", forwardReq.URL.String(), forwardErr)
@@ -164,18 +165,19 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			rw.Header().Add(k, vv)
 		}
 	}
-	for k, v := range forwardResponse.Trailer {
-		log.Println("Trailer key: v", k, v)
-		for _, vv := range v {
-			rw.Header().Add(k, vv)
-		}
-	}
+
 	log.Println("forwardResponse.Trailer => ", forwardResponse.Trailer)
 
 	if _, err = rw.Write(body); err != nil {
 		logMessage := fmt.Sprintf("error write to client. Cause: %s", readError)
 		log.Println(logMessage)
 		return
+	}
+	for k, v := range forwardResponse.Trailer {
+		log.Println("Trailer key: v", k, v)
+		for _, vv := range v {
+			rw.Header().Add(k, vv)
+		}
 	}
 }
 
