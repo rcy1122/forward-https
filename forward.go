@@ -143,7 +143,6 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 	log.Println("forward request path: ", forwardReq.URL.String())
 
-	// grpc.Dial(forwardReq.URL.String())
 	forwardResponse, forwardErr := fa.client.Do(forwardReq)
 	if forwardErr != nil {
 		logMessage := fmt.Sprintf("error forward request %s. Cause: %s", forwardReq.URL.String(), forwardErr)
