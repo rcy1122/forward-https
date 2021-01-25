@@ -158,6 +158,8 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer forwardResponse.Body.Close()
+	log.Println("receive body: ", string(body))
+	return
 	if _, err = rw.Write(body); err != nil {
 		logMessage := fmt.Sprintf("error write to client. Cause: %s", readError)
 		log.Println(logMessage)
