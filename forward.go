@@ -198,7 +198,7 @@ func (fa *Forward) authorityAuthentication(req *http.Request) (bool, error) {
 	if req.TLS == nil {
 		return false, errors.New("conn tls state is nil")
 	}
-
+	log.Println("req.TLS", req.TLS.PeerCertificates)
 	allow, err := fa.requestAuthorization(req)
 	if err != nil {
 		return false, fmt.Errorf("authorization: %w", err)
@@ -215,12 +215,14 @@ type Data struct {
 }
 
 func (fa *Forward) requestAuthorization(req *http.Request) (bool, error) {
+	log.Printf("fa.config.AuthAddress: %s", fa.config.AuthAddress)
 	forwardReq, err := http.NewRequest(http.MethodGet, fa.config.AuthAddress, nil)
 	if err != nil {
 		return false, fmt.Errorf("new request: %w ", err)
 	}
 	conn := req.TLS
 	sub := ""
+	log.Printf("VerifiedChains len: %d", len(conn.VerifiedChains))
 	for _, k := range conn.VerifiedChains {
 		for _, v := range k {
 			log.Printf("Issuer: %v, Subject: %v", v.Issuer, v.Subject)
