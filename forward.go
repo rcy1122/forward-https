@@ -174,6 +174,8 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			rw.Header().Add(k, vv)
 		}
 	}
+
+	log.Println("forwardResponse.Trailer => ", forwardResponse.Trailer)
 	for k, v := range forwardResponse.Trailer {
 		log.Println("tk, v", k, v)
 		for _, vv := range v {
@@ -234,7 +236,7 @@ func (fa *Forward) requestAuthorization(req *http.Request) (bool, error) {
 		}
 	}
 	if sub == "" {
-		log.Println("no identity")
+		log.Println("no sub info")
 		return false, nil
 	}
 	objs := strings.Split(req.Host, ".")
