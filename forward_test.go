@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -24,7 +25,8 @@ func TestNew(t *testing.T) {
 		t.Fatal(err)
 	}
 	recorder := httptest.NewRecorder()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:1992/adsf", nil)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:1992/adsf", strings.NewReader("Hello"))
 	if err != nil {
 		t.Fatal(err)
 	}

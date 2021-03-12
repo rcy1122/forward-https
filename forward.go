@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -88,9 +89,9 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}
 
 	fa.client = &http.Client{
-		CheckRedirect: func(r *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+		// CheckRedirect: func(r *http.Request, via []*http.Request) error {
+		// 	return http.ErrUseLastResponse
+		// },
 		Timeout: 30 * time.Second,
 	}
 
@@ -127,9 +128,8 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	defer func() {
 		log.Println("Plugin ServeHTTP spend time", time.Since(start))
 	}()
-	log.Println("receive request: ", req.Host, req.URL.Path, req.Header.Get("content-type"))
+	log.Println("receive request: ", req.URL.String(), req.Host, req.URL.Path, req.Header.Get("content-type"))
 	allow, err := fa.authorityAuthentication(req)
-	log.Println("authorityAuthentication spend time", time.Since(start))
 	if err != nil {
 		logMessage := fmt.Sprintf("error calling authorization service: %s. Cause: %s", fa.config.AuthAddress, err)
 		log.Printf(logMessage)
@@ -141,7 +141,8 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	start2 := time.Now()
+	log.Println("start forward request: ", req.URL.String(), req.Host, req.URL.Path)
+	log.Printf("forward header: %v \n", req.Header)
 	forwardReq, err := fa.forwardRequest(req)
 	if err != nil {
 		logMessage := fmt.Sprintf("error assembly request %s. Cause: %s", req.URL.Path, err)
@@ -149,42 +150,66 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		rw.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	log.Println("forward request path: ", forwardReq.URL.String())
-	log.Println("forward request: ", forwardReq.Host, forwardReq.URL.Path, forwardReq.Header.Get("content-type"))
 
 	forwardResponse, forwardErr := fa.client.Do(forwardReq)
-	log.Println("forwardRequest spend time", time.Since(start2))
+	log.Println("end forward request: ", forwardReq.URL.String(), forwardReq.Host, forwardReq.URL.Path)
 	if forwardErr != nil {
 		logMessage := fmt.Sprintf("error forward request %s. Cause: %s", forwardReq.URL.String(), forwardErr)
 		log.Println(logMessage)
 		rw.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	body, readError := ioutil.ReadAll(forwardResponse.Body)
-	if readError != nil {
-		logMessage := fmt.Sprintf("error reading body %s. Cause: %s", forwardReq.URL.String(), readError)
-		log.Println(logMessage)
-		rw.WriteHeader(http.StatusInternalServerError)
-		return
+	log.Printf("end forward header: %v \n", forwardResponse.Header)
+
+	var sb strings.Builder
+	buf := make([]byte, 256)
+	for {
+		n, err := forwardResponse.Body.Read(buf)
+		if err != nil {
+			if err != io.EOF {
+				fmt.Println("read error:", err)
+			}
+			break
+		}
+		sb.Write(buf[:n])
 	}
+
+	// body := make([]byte, 4096)
+	// r := bufio.NewReader(forwardResponse.Body)
+	// _, readError := r.Read(body)
+	// if readError != nil {
+	//
+	// 	// }
+	//
+	// 	// body, readError := ioutil.ReadAll(forwardResponse.Body)
+	// 	// if readError != nil {
+	// 	log.Printf("end forward header: %v \n", forwardResponse.Header)
+	//
+	// 	logMessage := fmt.Sprintf("error reading body %s. Cause: %s", forwardReq.URL.String(), readError)
+	// 	log.Println(logMessage)
+	// 	rw.WriteHeader(http.StatusInternalServerError)
+	// 	return
+	// }
 	defer forwardResponse.Body.Close()
+	log.Printf("resp: %s, body: %s \n", forwardReq.URL.String(), sb.String())
+
 	for k, v := range forwardResponse.Header {
-		log.Println("hk, v", k, v)
+		log.Printf("resp: %s, hk: %s, v: %s \n", forwardReq.URL.String(), k, v)
 		for _, vv := range v {
 			rw.Header().Add(k, vv)
 		}
 	}
 
-	log.Println("forwardResponse.Trailer => ", forwardResponse.Trailer)
+	log.Printf("resp: %s, forwardResponse.Trailer => %s \n", forwardReq.URL.String(), forwardResponse.Trailer)
 	for k, v := range forwardResponse.Trailer {
-		log.Println("tk, v", k, v)
+		log.Printf("resp: %s, tk: %s, v: %s \n", forwardReq.URL.String(), k, v)
 		for _, vv := range v {
 			rw.Header().Add(http.TrailerPrefix+k, vv)
 		}
 	}
 
-	if _, err = rw.Write(body); err != nil {
-		logMessage := fmt.Sprintf("error write to client. Cause: %s", readError)
+	if _, err = rw.Write([]byte(sb.String())); err != nil {
+		logMessage := fmt.Sprintf("error write to client. Cause: %s", err)
 		log.Println(logMessage)
 		return
 	}
@@ -198,7 +223,6 @@ func (fa *Forward) authorityAuthentication(req *http.Request) (bool, error) {
 	if req.TLS == nil {
 		return false, errors.New("conn tls state is nil")
 	}
-	log.Println("req.TLS", req.TLS.PeerCertificates)
 	allow, err := fa.requestAuthorization(req)
 	if err != nil {
 		return false, fmt.Errorf("authorization: %w", err)
@@ -215,7 +239,6 @@ type Data struct {
 }
 
 func (fa *Forward) requestAuthorization(req *http.Request) (bool, error) {
-	log.Printf("fa.config.AuthAddress: %s", fa.config.AuthAddress)
 	forwardReq, err := http.NewRequest(http.MethodGet, fa.config.AuthAddress, nil)
 	if err != nil {
 		return false, fmt.Errorf("new request: %w ", err)
@@ -266,28 +289,49 @@ func (fa *Forward) requestAuthorization(req *http.Request) (bool, error) {
 	return o.Data.Allow, nil
 }
 
-func (fa *Forward) forwardRequest(req *http.Request) (*http.Request, error) {
-	host, port := fa.queryForwardAddressPort(req)
-	u := bytes.Buffer{}
-	if port == "" {
-		port = fa.config.Port
+func (fa *Forward) forwardRequest(r1 *http.Request) (*http.Request, error) {
+	reqData, err := ioutil.ReadAll(r1.Body)
+	if err != nil {
+		return nil, err
 	}
-	if port == "80" {
+	//
+	// r2 := r1.Clone(context.Background())
+	// r2.Body = ioutil.NopCloser(bytes.NewBuffer(reqData))
+	// r1.Body = ioutil.NopCloser(bytes.NewBuffer(reqData))
+	//
+	// r2.URL, err = url.Parse(r1.URL.String())
+	// if err != nil {
+	// 	return nil , fmt.Errorf("parse r1 url, %w", err)
+	// }
+
+	host, port := fa.queryForwardAddressPort(r1)
+	u := bytes.Buffer{}
+	// if port == "" {
+	// 	port = fa.config.Port
+	// }
+	// if port == "80" {
+	// 	u.WriteString("http://")
+	// } else {
+
+	if port == "31055" {
 		u.WriteString("http://")
 	} else {
 		u.WriteString("https://")
 	}
+	// }
 	u.WriteString(host)
 	u.WriteString(fmt.Sprintf(":%s", port))
-	u.WriteString(req.URL.Path)
+	u.WriteString(r1.URL.Path)
+	//
 	forwardUrl := u.String()
-	log.Println("forward to", forwardUrl)
-	r, err := http.NewRequest(req.Method, forwardUrl, req.Body)
+	log.Println("forward to => ", forwardUrl)
+
+	r2, err := http.NewRequest(r1.Method, forwardUrl, ioutil.NopCloser(bytes.NewBuffer(reqData)))
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
 	}
-	r.Header = req.Header
-	return r, nil
+	r2.Header = r1.Header
+	return r2, nil
 }
 
 func (fa *Forward) queryForwardAddressPort(req *http.Request) (string, string) {
@@ -296,6 +340,5 @@ func (fa *Forward) queryForwardAddressPort(req *http.Request) (string, string) {
 		log.Printf("Unable to split host and port: %v. Fallback to request host.", err)
 		host = req.Host
 	}
-
 	return host, port
 }
