@@ -8,13 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -68,12 +65,10 @@ func CreateConfig() *Config {
 }
 
 type Forward struct {
-	name         string
-	next         http.Handler
-	config       *Config
-	client       *http.Client
-	tr           http.RoundTripper
-	errorHandler func(http.ResponseWriter, *http.Request, error)
+	name   string
+	next   http.Handler
+	config *Config
+	client *http.Client
 }
 
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
@@ -106,39 +101,6 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	tr.TLSClientConfig = tlsConfig
 
 	fa.client.Transport = tr
-
-	rtr, err := createRoundtripper(tlsConfig)
-	if err != nil {
-		return nil, fmt.Errorf("create roundtripper: %w", err)
-	}
-
-	fa.tr = rtr
-	fa.errorHandler = func(w http.ResponseWriter, request *http.Request, err error) {
-		statusCode := http.StatusInternalServerError
-
-		switch {
-		case errors.Is(err, io.EOF):
-			statusCode = http.StatusBadGateway
-		case errors.Is(err, context.Canceled):
-			statusCode = StatusClientClosedRequest
-		default:
-			var netErr net.Error
-			if errors.As(err, &netErr) {
-				if netErr.Timeout() {
-					statusCode = http.StatusGatewayTimeout
-				} else {
-					statusCode = http.StatusBadGateway
-				}
-			}
-		}
-
-		fmt.Printf("'%d %s' caused by: %v \n", statusCode, statusText(statusCode), err)
-		w.WriteHeader(statusCode)
-		_, werr := w.Write([]byte(statusText(statusCode)))
-		if werr != nil {
-			fmt.Println("Error while writing status code", werr)
-		}
-	}
 	log.Println("config.AuthAddress: ", fa.config.AuthAddress)
 	return fa, nil
 }
@@ -159,26 +121,6 @@ func (fa *Forward) createTLSConfig() (*tls.Config, error) {
 	}, nil
 }
 
-func (fa *Forward) createProxy(rw http.ResponseWriter, req *http.Request) *httputil.ReverseProxy {
-	host, port := fa.queryForwardAddressPort(req)
-	if port == "" {
-		port = fa.config.Port
-	}
-	remote, err := url.Parse(fmt.Sprintf("h2://%s:%s", host, port))
-	if err != nil {
-		logMessage := fmt.Sprintf("error assembly request %s. Cause: %s", req.URL.Path, err)
-		log.Printf(logMessage)
-		rw.WriteHeader(http.StatusBadRequest)
-		return nil
-	}
-	log.Printf("forward to %v\n", remote)
-	proxy := httputil.NewSingleHostReverseProxy(remote)
-	proxy.Transport = fa.tr
-	proxy.FlushInterval = 100 * time.Millisecond
-	proxy.ErrorHandler = fa.errorHandler
-	return proxy
-}
-
 func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	defer func() {
@@ -196,14 +138,8 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		rw.WriteHeader(http.StatusForbidden)
 		return
 	}
-
-	log.Println("start forward request: ", req.URL.String(), req.Host, req.URL.Path)
-	log.Printf("forward header: %v \n", req.Header)
-	proxy := fa.createProxy(rw, req)
-
-	if proxy != nil {
-		proxy.ServeHTTP(rw, req)
-	}
+	log.Println("start next")
+	fa.next.ServeHTTP(rw, req)
 }
 
 func (fa *Forward) authorityAuthentication(req *http.Request) (bool, error) {
