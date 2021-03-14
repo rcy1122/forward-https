@@ -2,7 +2,6 @@
 package forward_https
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -14,6 +13,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -67,10 +68,12 @@ func CreateConfig() *Config {
 }
 
 type Forward struct {
-	name   string
-	next   http.Handler
-	config *Config
-	client *http.Client
+	name         string
+	next         http.Handler
+	config       *Config
+	client       *http.Client
+	tr           http.RoundTripper
+	errorHandler func(http.ResponseWriter, *http.Request, error)
 }
 
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
@@ -92,7 +95,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		// CheckRedirect: func(r *http.Request, via []*http.Request) error {
 		// 	return http.ErrUseLastResponse
 		// },
-		Timeout: 60 * time.Second,
+		Timeout: 30 * time.Second,
 	}
 
 	tlsConfig, err := fa.createTLSConfig()
@@ -103,6 +106,39 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	tr.TLSClientConfig = tlsConfig
 
 	fa.client.Transport = tr
+
+	rtr, err := createRoundtripper(tlsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create roundtripper: %w", err)
+	}
+
+	fa.tr = rtr
+	fa.errorHandler = func(w http.ResponseWriter, request *http.Request, err error) {
+		statusCode := http.StatusInternalServerError
+
+		switch {
+		case errors.Is(err, io.EOF):
+			statusCode = http.StatusBadGateway
+		case errors.Is(err, context.Canceled):
+			statusCode = StatusClientClosedRequest
+		default:
+			var netErr net.Error
+			if errors.As(err, &netErr) {
+				if netErr.Timeout() {
+					statusCode = http.StatusGatewayTimeout
+				} else {
+					statusCode = http.StatusBadGateway
+				}
+			}
+		}
+
+		fmt.Printf("'%d %s' caused by: %v \n", statusCode, statusText(statusCode), err)
+		w.WriteHeader(statusCode)
+		_, werr := w.Write([]byte(statusText(statusCode)))
+		if werr != nil {
+			fmt.Println("Error while writing status code", werr)
+		}
+	}
 	log.Println("config.AuthAddress: ", fa.config.AuthAddress)
 	return fa, nil
 }
@@ -123,12 +159,32 @@ func (fa *Forward) createTLSConfig() (*tls.Config, error) {
 	}, nil
 }
 
+func (fa *Forward) createProxy(rw http.ResponseWriter, req *http.Request) *httputil.ReverseProxy {
+	host, port := fa.queryForwardAddressPort(req)
+	if port == "" {
+		port = fa.config.Port
+	}
+	remote, err := url.Parse(fmt.Sprintf("h2://%s:%s", host, port))
+	if err != nil {
+		logMessage := fmt.Sprintf("error assembly request %s. Cause: %s", req.URL.Path, err)
+		log.Printf(logMessage)
+		rw.WriteHeader(http.StatusBadRequest)
+		return nil
+	}
+	log.Printf("forward to %v\n", remote)
+	proxy := httputil.NewSingleHostReverseProxy(remote)
+	proxy.Transport = fa.tr
+	proxy.FlushInterval = 100 * time.Millisecond
+	proxy.ErrorHandler = fa.errorHandler
+	return proxy
+}
+
 func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	defer func() {
 		log.Println("Plugin ServeHTTP spend time", time.Since(start))
 	}()
-	log.Println("receive request: ", req.URL.String(), req.Host, req.URL.Path, req.Header.Get("content-type"))
+	log.Println("\nreceive request: ", req.URL.String(), req.Host, req.URL.Path, req.Header.Get("content-type"))
 	allow, err := fa.authorityAuthentication(req)
 	if err != nil {
 		logMessage := fmt.Sprintf("error calling authorization service: %s. Cause: %s", fa.config.AuthAddress, err)
@@ -143,76 +199,10 @@ func (fa *Forward) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 	log.Println("start forward request: ", req.URL.String(), req.Host, req.URL.Path)
 	log.Printf("forward header: %v \n", req.Header)
-	forwardReq, err := fa.forwardRequest(req)
-	if err != nil {
-		logMessage := fmt.Sprintf("error assembly request %s. Cause: %s", req.URL.Path, err)
-		log.Printf(logMessage)
-		rw.WriteHeader(http.StatusBadRequest)
-		return
-	}
+	proxy := fa.createProxy(rw, req)
 
-	forwardResponse, forwardErr := fa.client.Do(forwardReq)
-	log.Println("end forward request: ", forwardReq.URL.String(), forwardReq.Host, forwardReq.URL.Path)
-	if forwardErr != nil {
-		logMessage := fmt.Sprintf("error forward request %s. Cause: %s", forwardReq.URL.String(), forwardErr)
-		log.Println(logMessage)
-		rw.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	log.Printf("end forward header: %v \n", forwardResponse.Header)
-
-	var body strings.Builder
-	buf := make([]byte, 256)
-	for {
-		n, err := forwardResponse.Body.Read(buf)
-		if err != nil {
-			if err != io.EOF {
-				fmt.Println("read error:", err)
-			}
-			break
-		}
-		body.Write(buf[:n])
-	}
-
-	// body := make([]byte, 4096)
-	// r := bufio.NewReader(forwardResponse.Body)
-	// _, readError := r.Read(body)
-	// if readError != nil {
-	//
-	// 	// }
-	//
-	// body, readError := ioutil.ReadAll(forwardResponse.Body)
-	// if readError != nil {
-	// 	log.Printf("end forward header: %v \n", forwardResponse.Header)
-	// 	//
-	// 	logMessage := fmt.Sprintf("error reading body %s. Cause: %s", forwardReq.URL.String(), readError)
-	// 	log.Println(logMessage)
-	// 	rw.WriteHeader(http.StatusInternalServerError)
-	// 	return
-	// }
-
-	defer forwardResponse.Body.Close()
-	log.Printf("resp: %s, body: %s \n", forwardReq.URL.String(), body.String())
-
-	for k, v := range forwardResponse.Header {
-		log.Printf("resp: %s, hk: %s, v: %s \n", forwardReq.URL.String(), k, v)
-		for _, vv := range v {
-			rw.Header().Add(k, vv)
-		}
-	}
-
-	log.Printf("resp: %s, forwardResponse.Trailer => %s \n", forwardReq.URL.String(), forwardResponse.Trailer)
-	for k, v := range forwardResponse.Trailer {
-		log.Printf("resp: %s, tk: %s, v: %s \n", forwardReq.URL.String(), k, v)
-		for _, vv := range v {
-			rw.Header().Add(http.TrailerPrefix+k, vv)
-		}
-	}
-
-	if _, err = rw.Write([]byte(body.String())); err != nil {
-		logMessage := fmt.Sprintf("error write to client. Cause: %s", err)
-		log.Println(logMessage)
-		return
+	if proxy != nil {
+		proxy.ServeHTTP(rw, req)
 	}
 }
 
@@ -288,43 +278,6 @@ func (fa *Forward) requestAuthorization(req *http.Request) (bool, error) {
 	}
 	log.Printf("Authorization Request: %s, %s, %s ---> %v", q.Get("sub"), q.Get("obj"), "conn", o.Data.Allow)
 	return o.Data.Allow, nil
-}
-
-func (fa *Forward) forwardRequest(r1 *http.Request) (*http.Request, error) {
-	// r2 := r1.Clone(context.Background())
-	// r2.Body = ioutil.NopCloser(bytes.NewBuffer(reqData))
-	// r1.Body = ioutil.NopCloser(bytes.NewBuffer(reqData))
-	//
-	// r2.URL, err = url.Parse(r1.URL.String())
-	// if err != nil {
-	// 	return nil , fmt.Errorf("parse r1 url, %w", err)
-	// }
-
-	host, port := fa.queryForwardAddressPort(r1)
-	u := bytes.Buffer{}
-	// if port == "" {
-	// 	port = fa.config.Port
-	// }
-	// if port == "80" {
-	// 	u.WriteString("http://")
-	// } else {
-
-	u.WriteString("https://")
-
-	// }
-	u.WriteString(host)
-	u.WriteString(fmt.Sprintf(":%s", port))
-	u.WriteString(r1.URL.Path)
-	//
-	forwardUrl := u.String()
-	log.Println("forward to => ", forwardUrl)
-
-	r2, err := http.NewRequest(r1.Method, forwardUrl, r1.Body)
-	if err != nil {
-		return nil, fmt.Errorf("new request: %w", err)
-	}
-	r2.Header = r1.Header
-	return r2, nil
 }
 
 func (fa *Forward) queryForwardAddressPort(req *http.Request) (string, string) {
