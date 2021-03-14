@@ -3,7 +3,7 @@ package forward_https
 // modified from traefik
 import (
 	"crypto/tls"
-	"golang.org/x/net/http2"
+	"golang.orgx/x/net/http2"
 	"net"
 	"net/http"
 	"strings"
